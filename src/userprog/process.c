@@ -17,6 +17,7 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "syscall.h"
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
@@ -142,6 +143,29 @@ process_exit (void)
   struct thread *child = NULL;
   struct list_elem *e;
   uint32_t *pd;
+  struct currFile *cF = NULL;
+
+  if(lock_held_by_current_thread(&filesys_lock)) lock_release(&filesys_lock);
+
+  cF = getFile(2);
+  if(cF != NULL)
+  {
+	lock_acquire(&filesys_lock);
+	file_close(cF->file);
+	lock_release(&filesys_lock);
+	list_remove(&cF->elem);
+	palloc_free_page(cF);
+  }
+  if(cur->cmd != NULL) printf("%s: exit(%d)\n", cur->cmd, cur->exitStatus);
+  sema_up(&cur->wait_sema);
+
+  for(e = list_begin(&cur->children); e != list_end(&cur->children); e = list_next(e))
+  {
+	child = list_entry(e, struct thread, childelem);
+	sema_down(&child->wait_sema);
+	sema_up(&child->exit_sema);
+  }
+  sema_down(&cur->exit_sema);
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
@@ -240,7 +264,7 @@ struct Elf32_Phdr
 #define PF_W 2          /* Writable. */
 #define PF_R 4          /* Readable. */
 
-static bool setup_stack (void **esp);
+static bool setup_stack (void **esp, const char *file_name);
 static bool validate_segment (const struct Elf32_Phdr *, struct file *);
 static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
@@ -259,6 +283,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
   off_t file_ofs;
   bool success = false;
   int i;
+  char *token, *save_ptr, *fn_copy;
 
   /* Allocate and activate page directory. */
   t->pagedir = pagedir_create ();
@@ -267,12 +292,23 @@ load (const char *file_name, void (**eip) (void), void **esp)
   process_activate ();
 
   /* Open executable file. */
-  file = filesys_open (file_name);
+  fn_copy = palloc_get_page(0);
+  if(fn_copy == NULL) return TID_ERROR;
+  strlcpy(fn_copy, file_name, PGSIZE);
+  token = strtok_r (fn_copy, " ", &save_ptr);
+
+  file = filesys_open (token);
+  struct currFile *opened = palloc_get_page(0);
+  opened->fd = thread_current()->next_fd;
+  thread_current()->next_fd++;
+  opened->file = file;
+  list_push_back(&thread_current()->openfiles, &opened->elem);
   if (file == NULL) 
     {
       printf ("load: %s: open failed\n", file_name);
       goto done; 
     }
+  file_deny_write(file);
 
   /* Read and verify executable header. */
   if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
@@ -347,7 +383,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
     }
 
   /* Set up stack. */
-  if (!setup_stack (esp))
+  if (!setup_stack (esp, file_name))
     goto done;
 
   /* Start address. */
@@ -357,7 +393,6 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
  done:
   /* We arrive here whether the load is successful or not. */
-  file_close (file);
   return success;
 }
 
@@ -472,20 +507,79 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 /* Create a minimal stack by mapping a zeroed page at the top of
    user virtual memory. */
 static bool
-setup_stack (void **esp) 
+setup_stack (void **esp, const char *file_name) 
 {
   uint8_t *kpage;
   bool success = false;
+
+  char *token, *save_ptr, *fn_copy;
+  char **tokens = palloc_get_page(0);
+  int i = 0, tokensLen = 0;
+  char *espChar;
+  uint8_t word_align = 0;
+  fn_copy = palloc_get_page(0);
+  if(fn_copy == NULL) return TID_ERROR;
+
+  strlcpy(fn_copy, file_name, PGSIZE);
+
+  for(token = strtok_r(fn_copy, " ", &save_ptr); token != NULL; token = strtok_r(NULL, " ", &save_ptr))
+  {
+	if(i == 0)
+	{
+		thread_current()->cmd = palloc_get_page(0);
+		strlcpy(thread_current()->cmd, token, strlen(token) + 1);
+	}
+	tokens[i] = token;
+	i++;
+  }
 
   kpage = palloc_get_page (PAL_USER | PAL_ZERO);
   if (kpage != NULL) 
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
-      if (success)
-        *esp = PHYS_BASE - 12;
+      if (success){
+        *esp = PHYS_BASE;
+	espChar = (char *) *esp;
+	int j, length;
+	for(j = i; j > 0; j--)
+	{
+		length = strlen(tokens[j - 1]);
+		tokensLen += length + 1;
+		espChar -= length + 1;
+		strlcpy(espChar, tokens[j - 1], length + 1);
+		tokens[j - 1] = espChar;
+	}
+	
+	tokensLen = 4 - (tokensLen % 4);
+	for(j = 0; j < tokensLen; j++)
+	{
+		espChar--;
+		*espChar = word_align;
+	}
+
+	espChar -= 4;
+	*espChar = 0;
+
+	for(j = i; j > 0; j--)
+	{
+		espChar -= 4;
+		*((int *) espChar) = (unsigned) tokens[j - 1];
+	}
+
+	void *tmp = espChar;
+	espChar -= 4;
+	*((int *) espChar) = (unsigned) tmp;
+	espChar -= 4;
+	*espChar = i;
+	espChar -= 4;
+	*espChar = 0;
+	*esp = espChar;
+      }
       else
         palloc_free_page (kpage);
     }
+  palloc_free_page (fn_copy);
+  palloc_free_page (tokens);
   return success;
 }
 
