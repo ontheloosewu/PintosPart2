@@ -463,7 +463,8 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
   t->magic = THREAD_MAGIC;
-
+  t->next_fd = 2;
+  t->cmd = NULL;
   list_init(&t->openfiles);
   list_init(&t->children);
   sema_init(&t->load_sema, 0);
@@ -585,6 +586,18 @@ allocate_tid (void)
   lock_release (&tid_lock);
 
   return tid;
+}
+
+struct thread *
+get_thread_by_tid(tid_t tid)
+{
+	struct list_elem *elem;
+	for(elem = list_begin (&all_list); elem != list_end(&all_list); elem = list_next(elem))
+	{
+		struct thread *t = list_entry (elem, struct thread, allelem);
+		if (t->tid == tid) return t;
+	}
+	return NULL;
 }
 
 /* Offset of `stack' member within `struct thread'.

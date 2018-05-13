@@ -102,6 +102,7 @@ struct thread
     struct list children;
     struct list_elem childelem;
     int next_fd;
+    char *cmd;
     struct semaphore load_sema;
     struct semaphore wait_sema;
     struct semaphore exit_sema;
@@ -138,6 +139,7 @@ void thread_block (void);
 void thread_unblock (struct thread *);
 
 struct thread *thread_current (void);
+struct thread *get_thread_by_tid(tid_t tid);
 tid_t thread_tid (void);
 const char *thread_name (void);
 
