@@ -88,7 +88,24 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
-  return -1;
+  int exitStatus;
+  struct thread *curr = thread_current();
+  struct thread *child = NULL;
+  struct list_elem *elem;
+
+  for (elem = list_begin(&curr->children); elem != list_end(&curr->children); elem = list_next(elem)){
+	child = list_entry(elem, struct thread, childelem);
+	if(child->tid == child_tid) break;
+  }
+
+  if (elem == list_end(&curr->children)) return -1;
+  list_remove(&child->childelem);
+  
+  sema_down(&child->wait_sema);
+  exitStatus = child->exitStatus;
+  sema_up(&child->exit_sema);
+
+  return exitStatus;
 }
 
 /* Free the current process's resources. */
@@ -437,7 +454,7 @@ setup_stack (void **esp)
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
       if (success)
-        *esp = PHYS_BASE;
+        *esp = PHYS_BASE - 12;
       else
         palloc_free_page (kpage);
     }
