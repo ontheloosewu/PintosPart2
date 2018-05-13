@@ -25,6 +25,7 @@ void syscall_seek(int fd, unsigned position);
 unsigned syscall_tell(int fd);
 void syscall_close(int fd);
 bool check(const void *addr);
+static struct currFile* getFile (int);
 //struct lock files;
 
 
@@ -146,6 +147,7 @@ syscall_handler (struct intr_frame *f UNUSED)
 	break;
 	}
 }
+}
 bool
 check(const void* addr)
 {
@@ -254,7 +256,6 @@ syscall_open(const char *file)
 
 	return -1;
 }
-
 int 
 syscall_filesize(int fd)
 {
@@ -267,9 +268,112 @@ syscall_filesize(int fd)
 	lock_release(&filesys_lock);
 	return retVal;
 }
+int
+syscall_read(int fd, void *buffer, unsigned size)
+{
+	int bytes_read = 0;
+	char *buffChar = NULL;
+	struct currFile *cF = NULL;
 
-struct 
-currFile *getFile(int fd)
+	if(!check(buffer)) syscall_exit(-1);
+	
+	buffChar = (char *) buffer;
+	if(fd == 0)
+	{
+		while(size > 0)
+		{
+			input_getc();
+			size--;
+			bytes_read++;
+		}
+		return bytes_read;
+	}
+	else
+	{
+		cF = getFile(fd);
+		if(cF == NULL) return -1;
+		
+		lock_acquire(&filesys_lock);
+		bytes_read = file_read(cF->file, buffer, size);
+		lock_release(&filesys_lock);
+
+		return bytes_read;
+	}
+}
+int
+syscall_write(int fd, const void *buffer, unsigned size)
+{
+	int bytes_written = 0;
+	char *buffChar = NULL;
+	struct currFile *cF = NULL;
+	
+	if (!check(buffer)) syscall_exit(-1);
+
+	buffChar = (char *) buffer;
+	if(fd == 1)
+	{
+		while(size > 200)
+		{
+			putbuf(buffChar, 200);
+			buffChar += 200;
+			size -= 200;
+			bytes_written += 200;
+		}
+		putbuf(buffChar, size);
+		bytes_written += size;
+		return bytes_written;
+	}
+	else
+	{
+		cF = getFile(fd);
+		if(cF == NULL) return 0;
+		
+		lock_acquire(&filesys_lock);
+		bytes_written = file_write(cF->file, buffer, size);
+		lock_release(&filesys_lock);
+		
+		return bytes_written;
+	}
+}
+void
+syscall_seek(int fd, unsigned position)
+{
+	struct currFile *cF = NULL;
+	cF = getFile(fd);
+	if(cF == NULL) return;
+	
+	lock_acquire(&filesys_lock);
+	file_seek(cF->file, position);
+	lock_release(&filesys_lock);
+}
+unsigned
+syscall_tell(int fd)
+{
+	unsigned retVal;
+	struct currFile *cF = NULL;
+	cF = getFile(fd);
+	if(cF == NULL) return 0;
+
+	lock_acquire(&filesys_lock);
+	retVal = file_tell(cF->file);
+	lock_release(&filesys_lock);
+	return retVal;
+}
+void
+syscall_close(int fd)
+{
+	struct currFile *cF = NULL;
+	cF = getFile(fd);
+	if(cF == NULL) return;
+	
+	lock_acquire(&filesys_lock);
+	file_close(cF->file);
+	lock_release(&filesys_lock);
+	list_remove(&cF->elem);
+	palloc_free_page(cF);
+}
+static struct currFile *
+getFile(int fd)
 {
 	struct thread *curr = thread_current();
 	struct list_elem *elem;

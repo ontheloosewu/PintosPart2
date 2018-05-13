@@ -30,6 +30,7 @@ process_execute (const char *file_name)
 {
   char *fn_copy;
   tid_t tid;
+  struct thread *child = NULL;
 
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
@@ -42,6 +43,13 @@ process_execute (const char *file_name)
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
+  if(tid != TID_ERROR) child = get_thread_by_tid(tid);
+  if(child != NULL)
+  {
+	list_push_back(&thread_current()->children, &child->childelem);
+	sema_down(&child->load_sema);
+	if(child->loadSuccess == -1) tid = TID_ERROR;
+  }
   return tid;
 }
 
@@ -52,6 +60,7 @@ start_process (void *file_name_)
 {
   char *file_name = file_name_;
   struct intr_frame if_;
+  struct thread *curr = thread_current();
   bool success;
 
   /* Initialize interrupt frame and load executable. */
@@ -63,8 +72,12 @@ start_process (void *file_name_)
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
-  if (!success) 
+  if (!success) {
+    curr->loadSuccess = -1;
+    sema_up(&curr->load_sema);
     thread_exit ();
+}
+  sema_up(&curr->load_sema);
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -108,11 +121,26 @@ process_wait (tid_t child_tid UNUSED)
   return exitStatus;
 }
 
+static struct currFile *
+getFile(int fd)
+{
+	struct thread *curr = thread_current();
+	struct list_elem *e;
+	for(e = list_begin(&curr->openfiles); e != list_end(&curr->openfiles); e = list_next(e))
+	{
+		struct currFile *cF = list_entry (e, struct currFile, elem);
+		if(cF->fd == fd) return cF;
+	}
+	return NULL;
+}
+
 /* Free the current process's resources. */
 void
 process_exit (void)
 {
   struct thread *cur = thread_current ();
+  struct thread *child = NULL;
+  struct list_elem *e;
   uint32_t *pd;
 
   /* Destroy the current process's page directory and switch back
