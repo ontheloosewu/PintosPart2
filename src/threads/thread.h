@@ -4,6 +4,8 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include "filesys/file.h"
+#include "threads/synch.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -23,6 +25,12 @@ typedef int tid_t;
 #define PRI_MIN 0                       /* Lowest priority. */
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
+
+struct currFile {
+	struct list_elem elem;
+	int fd;
+	struct file *file;
+};
 
 /* A kernel thread or user process.
 
@@ -89,6 +97,16 @@ struct thread
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
     struct list_elem allelem;           /* List element for all threads list. */
+    
+    struct list openfiles;
+    struct list children;
+    struct list_elem childelem;
+    int next_fd;
+    struct semaphore load_sema;
+    struct semaphore wait_sema;
+    struct semaphore exit_sema;
+    int exitStatus;
+    int loadSuccess;
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
