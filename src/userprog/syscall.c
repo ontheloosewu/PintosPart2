@@ -167,7 +167,7 @@ findFile(int fd)
 {
 	struct thread *curr = thread_current();
 	struct list_elem *elem;
-	elem = list_begin(&curr->openfiles)
+	elem = list_begin(&curr->openfiles);
 	while (elem != list_end(&curr->openfiles))
 	{
 		struct currFile *cF = list_entry(elem, struct currFile, elem);
