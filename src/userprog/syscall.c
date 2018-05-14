@@ -46,29 +46,32 @@ syscall_handler (struct intr_frame *f UNUSED)
   if (!check(((int *) esp)) || !check(((int *) esp) + 1)){
 	syscall_exit(-1);
   }
+  int fd = *(((int *) esp) + 1);
+  const char *argChar = *(((char **) esp) + 1);
+  unsigned argUS = *(((unsigned *) esp) + 2);
+  unsigned argUS3 = *(((unsigned *) esp) + 3);
+  const void *argVoid = (void *) *(((int *) esp) + 2);
   switch(*(int*) f->esp){
-  case 0:
+  case SYS_HALT:
   	syscall_halt();
   	break;
-  case 1:
+  case SYS_EXIT:
 	{
-	int currStatus = *(((int *) esp) + 1);
-	syscall_exit(currStatus);
+	syscall_exit(fd);
 	break;
 	}
-  case 2:
+  case SYS_EXEC:
 	{
-  	const char *line = *(((char **) esp) + 1);
-	*eax = (uint32_t) syscall_exec(line);
+	*eax = (uint32_t) syscall_exec(argChar);
   	break;
 	}
-  case 3:
+  case SYS_WAIT:
 	{
 	pid_t pid = *(((pid_t *) esp) + 1);
 	*eax = (uint32_t) syscall_wait(pid);
 	break;
 	}
-  case 4:
+  case SYS_CREATE:
 	{
   	//bool check1 = check(f->esp+1);
   	//bool check2 = check(*(f->esp+1));
@@ -84,65 +87,50 @@ syscall_handler (struct intr_frame *f UNUSED)
   		filesys_create(name, size);
   		lock_release(&files);
   	}*/
-	const char *file = *(((char **) esp) + 1);
-	unsigned initial_size = *(((unsigned *) esp) + 2);
-	*eax = (uint32_t) syscall_create(file, initial_size);
+	*eax = (uint32_t) syscall_create(argChar, argUS);
   	break;
 	}
-  case 5:
+  case SYS_REMOVE:
 	{
   	//check validity
   	//syscall_remove(*(f->esp+1), f);
-	const char *file = *(((char **) esp) + 1);
-	*eax = (uint32_t) syscall_remove(file);
+	*eax = (uint32_t) syscall_remove(argChar);
   	break;
 	}
-  case 6:
+  case SYS_OPEN:
 	{
   	//check validity
   	//syscall_open(*(f->esp+1));
-	const char *file = *(((char **) esp) + 1);
-	*eax = (uint32_t) syscall_open(file);
+	*eax = (uint32_t) syscall_open(argChar);
   	break;
 	}
-  case 7:
+  case SYS_FILESIZE:
 	{
-	int fd = *(((int *) esp) + 1);
 	*eax = (uint32_t) syscall_filesize(fd);
 	break;
 	}
-  case 8:
+  case SYS_READ:
 	{
-	int fd = *(((int *) esp) + 1);
-	void *buffer = (void *) *(((int **) esp) + 2);
-	unsigned size = *(((unsigned *) esp) + 3);
-	*eax = (uint32_t) syscall_read(fd, buffer, size);
+	*eax = (uint32_t) syscall_read(fd, argVoid, argUS3);
 	break;
 	}
-  case 9:
+  case SYS_WRITE:
 	{
-	int fd = *(((int *) esp) + 1);
-	const void *buffer = (void *) *(((int **) esp) + 2);
-	unsigned size = *(((unsigned *) esp) + 3);
-	*eax = (uint32_t) syscall_write(fd, buffer, size);
+	*eax = (uint32_t) syscall_write(fd, argVoid, argUS3);
 	break;
 	}
-  case 10:
+  case SYS_SEEK:
 	{
-	int fd = *(((int *) esp) + 1);
-	unsigned position = *(((unsigned *) esp) + 2);
-	syscall_seek(fd, position);
+	syscall_seek(fd, argUS);
 	break;
 	}
-  case 11:
+  case SYS_TELL:
 	{
-	int fd = *(((int *) esp) + 1);
 	*eax = (uint32_t) syscall_tell(fd);
 	break;
 	}
-  case 12:
+  case SYS_CLOSE:
 	{
-	int fd = *(((int *) esp) + 1);
 	syscall_close(fd);
 	break;
 	}
@@ -173,8 +161,8 @@ syscall_exit(int a)
 {
 	//thread_current->exit_status = a;
 	//thread_exit();
-	struct thread *curr = thread_current();
-	curr->exitStatus = a;
+	//struct thread *curr = thread_current();
+	thread_current()->exitStatus = a;
 	thread_exit();
 }
 pid_t 
@@ -190,7 +178,7 @@ syscall_exec(const char *cmd_line)
 bool 
 syscall_create(const char *file, unsigned initial_size)
 {
-	bool retVal;
+	bool retVal = false;
 	if(check(file))
 	{
 		lock_acquire(&filesys_lock);
@@ -198,11 +186,8 @@ syscall_create(const char *file, unsigned initial_size)
 		lock_release(&filesys_lock);
 		return retVal;
 	}
-	else
-	{
-		syscall_exit(-1);
-	}
-	return false;
+	else syscall_exit(-1);
+	return retVal;
 }
 bool 
 syscall_remove(const char *file)
@@ -214,7 +199,7 @@ syscall_remove(const char *file)
 		retVal = true;
 	}
 	return retVal;*/
-	bool retVal;
+	bool retVal = false;
 	if(check(file))
 	{
 		lock_acquire(&filesys_lock);
@@ -223,8 +208,7 @@ syscall_remove(const char *file)
 		return retVal;
 	}
 	else syscall_exit(-1);
-
-	return false;
+	return retVal;
 }
 int
 syscall_open(const char *file)
@@ -260,52 +244,45 @@ int
 syscall_filesize(int fd)
 {
 	int retVal;
-	struct currFile *cF = NULL;
-	cF = getFile(fd);
-	if(cF == NULL) return 0;
+	if(getFile(fd) == NULL) return 0;
 	lock_acquire(&filesys_lock);
-	retVal = file_length(cF->file);
+	retVal = file_length(getFile(fd)->file);
 	lock_release(&filesys_lock);
 	return retVal;
 }
 int
 syscall_read(int fd, void *buffer, unsigned size)
 {
-	int bytes_read = 0;
-	char *buffChar = NULL;
-	struct currFile *cF = NULL;
+	int readBytes = 0;
 
 	if(!check(buffer)) syscall_exit(-1);
 	
-	buffChar = (char *) buffer;
 	if(fd == 0)
 	{
 		while(size > 0)
 		{
 			input_getc();
 			size--;
-			bytes_read++;
+			readBytes++;
 		}
-		return bytes_read;
+		return readBytes;
 	}
 	else
 	{
-		cF = getFile(fd);
-		if(cF == NULL) return -1;
+		if(getFile(fd) == NULL) return -1;
 		
 		lock_acquire(&filesys_lock);
-		bytes_read = file_read(cF->file, buffer, size);
+		readBytes = file_read(getFile(fd)->file, buffer, size);
 		lock_release(&filesys_lock);
 
-		return bytes_read;
+		return readBytes;
 	}
 }
 int
 syscall_write(int fd, const void *buffer, unsigned size)
 {
-	int bytes_written = 0;
+	int totalBytes = 0;
 	char *buffChar = NULL;
-	struct currFile *cF = NULL;
 	
 	if (!check(buffer)) syscall_exit(-1);
 
@@ -317,60 +294,52 @@ syscall_write(int fd, const void *buffer, unsigned size)
 			putbuf(buffChar, 200);
 			buffChar += 200;
 			size -= 200;
-			bytes_written += 200;
+			totalBytes += 200;
 		}
 		putbuf(buffChar, size);
-		bytes_written += size;
-		return bytes_written;
+		totalBytes += size;
+		return totalBytes;
 	}
 	else
 	{
-		cF = getFile(fd);
-		if(cF == NULL) return 0;
+		if(getFile(fd) == NULL) return 0;
 		
 		lock_acquire(&filesys_lock);
-		bytes_written = file_write(cF->file, buffer, size);
+		totalBytes = file_write(getFile(fd)->file, buffer, size);
 		lock_release(&filesys_lock);
 		
-		return bytes_written;
+		return totalBytes;
 	}
 }
 void
 syscall_seek(int fd, unsigned position)
 {
-	struct currFile *cF = NULL;
-	cF = getFile(fd);
-	if(cF == NULL) return;
+	if(getFile(fd) == NULL) return;
 	
 	lock_acquire(&filesys_lock);
-	file_seek(cF->file, position);
+	file_seek(getFile(fd)->file, position);
 	lock_release(&filesys_lock);
 }
 unsigned
 syscall_tell(int fd)
 {
 	unsigned retVal;
-	struct currFile *cF = NULL;
-	cF = getFile(fd);
-	if(cF == NULL) return 0;
+	if(getFile(fd) == NULL) return 0;
 
 	lock_acquire(&filesys_lock);
-	retVal = file_tell(cF->file);
+	retVal = file_tell(getFile(fd)->file);
 	lock_release(&filesys_lock);
 	return retVal;
 }
 void
 syscall_close(int fd)
 {
-	struct currFile *cF = NULL;
-	cF = getFile(fd);
-	if(cF == NULL) return;
+	if(getFile(fd) == NULL) return;
 	
 	lock_acquire(&filesys_lock);
-	file_close(cF->file);
+	file_close(getFile(fd)->file);
 	lock_release(&filesys_lock);
-	list_remove(&cF->elem);
-	palloc_free_page(cF);
+	list_remove(&getFile(fd)->elem);
 }
 static struct currFile *
 getFile(int fd)
