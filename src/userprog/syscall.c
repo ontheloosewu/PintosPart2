@@ -33,7 +33,7 @@ void
 syscall_init (void) 
 {
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
-  lock_init(&filesys_lock);
+  lock_init(&sys_lock);
 }
 
 static void
@@ -198,12 +198,12 @@ syscall_exit(int a)
 pid_t 
 syscall_exec(const char *cmd_line)
 {
-	tid_t child_tid = TID_ERROR;
+	tid_t childTID = TID_ERROR;
 
 	if(!check(cmd_line)) syscall_exit(-1);
 
-	child_tid = process_execute(cmd_line);
-	return child_tid;
+	childTID = process_execute(cmd_line);
+	return childTID;
 }
 bool 
 syscall_create(const char *file, unsigned initial_size)
@@ -211,9 +211,9 @@ syscall_create(const char *file, unsigned initial_size)
 	bool retVal = false;
 	if(check(file))
 	{
-		lock_acquire(&filesys_lock);
+		lock_acquire(&sys_lock);
 		retVal = filesys_create(file, initial_size);
-		lock_release(&filesys_lock);
+		lock_release(&sys_lock);
 		return retVal;
 	}
 	else syscall_exit(-1);
@@ -232,9 +232,9 @@ syscall_remove(const char *file)
 	bool retVal = false;
 	if(check(file))
 	{
-		lock_acquire(&filesys_lock);
+		lock_acquire(&sys_lock);
 		retVal = filesys_remove(file);
-		lock_release(&filesys_lock);
+		lock_release(&sys_lock);
 		return retVal;
 	}
 	else syscall_exit(-1);
@@ -256,9 +256,9 @@ syscall_open(const char *file)
 	{
 		struct currFile *opened = palloc_get_page (0);
 		opened->fd = thread_current()->next_fd++;
-		lock_acquire(&filesys_lock);
+		lock_acquire(&sys_lock);
 		opened->file = filesys_open(file);
-		lock_release(&filesys_lock);
+		lock_release(&sys_lock);
 		
 		if(opened->file == NULL) return -1;
 		
@@ -274,9 +274,9 @@ syscall_filesize(int fd)
 {
 	int retVal;
 	if(findFile(fd) == NULL) return 0;
-	lock_acquire(&filesys_lock);
+	lock_acquire(&sys_lock);
 	retVal = file_length(findFile(fd)->file);
-	lock_release(&filesys_lock);
+	lock_release(&sys_lock);
 	return retVal;
 }
 int
@@ -300,9 +300,9 @@ syscall_read(int fd, void *buffer, unsigned size)
 	{								//Otherwise grab the file from the directory and call the supplied file_read function
 		if(findFile(fd) == NULL) return -1;
 		
-		lock_acquire(&filesys_lock);
+		lock_acquire(&sys_lock);
 		readBytes = file_read(findFile(fd)->file, buffer, size);
-		lock_release(&filesys_lock);
+		lock_release(&sys_lock);
 
 		return readBytes;
 	}
@@ -333,9 +333,9 @@ syscall_write(int fd, const void *buffer, unsigned size)
 	{										//Otherwise grab the file from the directory and call the supplied file_write function
 		if(findFile(fd) == NULL) return 0;
 		
-		lock_acquire(&filesys_lock);
+		lock_acquire(&sys_lock);
 		totalBytes = file_write(findFile(fd)->file, buffer, size);
-		lock_release(&filesys_lock);
+		lock_release(&sys_lock);
 		
 		return totalBytes;
 	}
@@ -345,9 +345,9 @@ syscall_seek(int fd, unsigned position)
 {
 	if(findFile(fd) == NULL) return;
 	
-	lock_acquire(&filesys_lock);
+	lock_acquire(&sys_lock);
 	file_seek(findFile(fd)->file, position);
-	lock_release(&filesys_lock);
+	lock_release(&sys_lock);
 }
 unsigned
 syscall_tell(int fd)
@@ -355,9 +355,9 @@ syscall_tell(int fd)
 	unsigned retVal;
 	if(findFile(fd) == NULL) return 0;
 
-	lock_acquire(&filesys_lock);
+	lock_acquire(&sys_lock);
 	retVal = file_tell(findFile(fd)->file);
-	lock_release(&filesys_lock);
+	lock_release(&sys_lock);
 	return retVal;
 }
 void
@@ -365,8 +365,8 @@ syscall_close(int fd)
 {
 	if(findFile(fd) == NULL) return;
 	
-	lock_acquire(&filesys_lock);
+	lock_acquire(&sys_lock);
 	file_close(findFile(fd)->file);
-	lock_release(&filesys_lock);
+	lock_release(&sys_lock);
 	list_remove(&findFile(fd)->elem);
 }

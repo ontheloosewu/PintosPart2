@@ -145,14 +145,14 @@ process_exit (void)
   uint32_t *pd;
   struct currFile *cF = NULL;
 
-  if(lock_held_by_current_thread(&filesys_lock)) lock_release(&filesys_lock);
+  if(lock_held_by_current_thread(&sys_lock)) lock_release(&sys_lock);
 
   cF = findFile(2);
   if(cF != NULL)
   {
-	lock_acquire(&filesys_lock);
+	lock_acquire(&sys_lock);
 	file_close(cF->file);
-	lock_release(&filesys_lock);
+	lock_release(&sys_lock);
 	list_remove(&cF->elem);
 	palloc_free_page(cF);
   }
