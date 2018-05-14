@@ -638,29 +638,30 @@ return success;*/
 	}
 
 	int k = 0;
-	void *tmp = espChar;
+	void *argv = espChar;
+	int argc = i;
 	switch(k)
 	{
 		case 0:
 		{
 			espChar -= 4;
-			*((int *) espChar) = (unsigned) tmp;
+			*((int *) espChar) = (unsigned) argv;
 			k++;
 		}
 		case 1:
 		{
 			espChar -= 4;
-			*espChar = i;
+			*espChar = argc;
 			k++;
 		}
 		case 2:
 		{
 			espChar -= 4;
-			*espChar = 0;
 			k++;
 		}
 	}
-	*esp = espChar;
+	*espChar = 0;
+	*esp = espChar; //esp has the number for each syscall case
       }
       else
         palloc_free_page (kpage);
