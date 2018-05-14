@@ -31,7 +31,7 @@ process_execute (const char *file_name)
 {
   char *fn_copy;
   tid_t tid;
-  struct thread *child = NULL;
+  struct thread *child;
 
   /* Make a copy of FILE_NAME.
      Otherwise there's a race between the caller and load(). */
@@ -44,7 +44,7 @@ process_execute (const char *file_name)
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
-  if(tid != TID_ERROR) child = get_thread_by_tid(tid);
+  else child = get_thread_by_tid(tid);
   if(child != NULL)
   {
 	list_push_back(&thread_current()->children, &child->childelem);
@@ -104,7 +104,7 @@ process_wait (tid_t child_tid UNUSED)
 {
   int exitStatus;
   struct thread *curr = thread_current();
-  struct thread *child = NULL;
+  struct thread *child;
   struct list_elem *elem;
 
   for (elem = list_begin(&curr->children); elem != list_end(&curr->children); elem = list_next(elem)){
@@ -512,17 +512,18 @@ setup_stack (void **esp, const char *file_name)
   uint8_t *kpage;
   bool success = false;
 
-  char *token, *save_ptr, *fn_copy;
+  char *token, *save_ptr, *fn_copy, *espChar;
   char **tokens = palloc_get_page(0);
   int i = 0, tokensLen = 0;
-  char *espChar;
-  uint8_t word_align = 0;
+  uint8_t word = 0;
   fn_copy = palloc_get_page(0);
   if(fn_copy == NULL) return TID_ERROR;
 
   strlcpy(fn_copy, file_name, PGSIZE);
 
-  for(token = strtok_r(fn_copy, " ", &save_ptr); token != NULL; token = strtok_r(NULL, " ", &save_ptr))
+  token = strtok_r(fn_copy, " ", &save_ptr);
+
+  while(token != NULL)
   {
 	if(i == 0)
 	{
@@ -531,6 +532,7 @@ setup_stack (void **esp, const char *file_name)
 	}
 	tokens[i] = token;
 	i++;
+	token = strtok_r(NULL, " ", &save_ptr);
   }
 
   kpage = palloc_get_page (PAL_USER | PAL_ZERO);
@@ -540,30 +542,35 @@ setup_stack (void **esp, const char *file_name)
       if (success){
         *esp = PHYS_BASE;
 	espChar = (char *) *esp;
-	int j, length;
-	for(j = i; j > 0; j--)
+	int length;
+	int j = i;
+	while(j > 0)
 	{
 		length = strlen(tokens[j - 1]);
 		tokensLen += length + 1;
 		espChar -= length + 1;
 		strlcpy(espChar, tokens[j - 1], length + 1);
 		tokens[j - 1] = espChar;
+		j--;
 	}
 	
 	tokensLen = 4 - (tokensLen % 4);
-	for(j = 0; j < tokensLen; j++)
+	while(j < tokensLen)
 	{
 		espChar--;
-		*espChar = word_align;
+		*espChar = word;
+		j++;
 	}
 
 	espChar -= 4;
 	*espChar = 0;
+	j = i;
 
-	for(j = i; j > 0; j--)
+	while(j > 0)
 	{
 		espChar -= 4;
 		*((int *) espChar) = (unsigned) tokens[j - 1];
+		j--;
 	}
 
 	void *tmp = espChar;
