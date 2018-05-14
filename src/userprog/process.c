@@ -123,7 +123,7 @@ process_wait (tid_t child_tid UNUSED)
 }
 
 static struct currFile *
-getFile(int fd)
+findFile(int fd)
 {
 	struct thread *curr = thread_current();
 	struct list_elem *e;
@@ -147,7 +147,7 @@ process_exit (void)
 
   if(lock_held_by_current_thread(&filesys_lock)) lock_release(&filesys_lock);
 
-  cF = getFile(2);
+  cF = findFile(2);
   if(cF != NULL)
   {
 	lock_acquire(&filesys_lock);

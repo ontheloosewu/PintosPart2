@@ -25,7 +25,7 @@ void syscall_seek(int fd, unsigned position);
 unsigned syscall_tell(int fd);
 void syscall_close(int fd);
 bool check(const void *addr);
-static struct currFile* getFile (int);
+static struct currFile* findFile (int);
 //struct lock files;
 
 
@@ -53,20 +53,24 @@ syscall_handler (struct intr_frame *f UNUSED)
   const void *argVoid = (void *) *(((int *) esp) + 2);
   switch(*(int*) f->esp){
   case SYS_HALT:
+	//Call system call halt
   	syscall_halt();
   	break;
   case SYS_EXIT:
 	{
+	//Call system call exit with a status argument
 	syscall_exit(fd);
 	break;
 	}
   case SYS_EXEC:
 	{
+	//Call system call execute with first argument, in this case is a command line 
 	*eax = (uint32_t) syscall_exec(argChar);
   	break;
 	}
   case SYS_WAIT:
 	{
+	//Call process_wait with argument pid from first argument
 	pid_t pid = *(((pid_t *) esp) + 1);
 	*eax = (uint32_t) syscall_wait(pid);
 	break;
@@ -87,6 +91,8 @@ syscall_handler (struct intr_frame *f UNUSED)
   		filesys_create(name, size);
   		lock_release(&files);
   	}*/
+
+	//Call system call create with first argument a file and second argument the size of that file
 	*eax = (uint32_t) syscall_create(argChar, argUS);
   	break;
 	}
@@ -94,6 +100,8 @@ syscall_handler (struct intr_frame *f UNUSED)
 	{
   	//check validity
   	//syscall_remove(*(f->esp+1), f);
+	
+	//Call system call remove with a file argument
 	*eax = (uint32_t) syscall_remove(argChar);
   	break;
 	}
@@ -101,36 +109,44 @@ syscall_handler (struct intr_frame *f UNUSED)
 	{
   	//check validity
   	//syscall_open(*(f->esp+1));
+
+	//Call system call open with a file argument
 	*eax = (uint32_t) syscall_open(argChar);
   	break;
 	}
   case SYS_FILESIZE:
 	{
+	//Call system call filesize with argument file directory
 	*eax = (uint32_t) syscall_filesize(fd);
 	break;
 	}
   case SYS_READ:
 	{
+	//Call system call read with arguments file directory, void buffer, and size of the buffer
 	*eax = (uint32_t) syscall_read(fd, argVoid, argUS3);
 	break;
 	}
   case SYS_WRITE:
 	{
+	//Call system call write with arguments file directory, void buffer, and size of the buffer
 	*eax = (uint32_t) syscall_write(fd, argVoid, argUS3);
 	break;
 	}
   case SYS_SEEK:
 	{
+	//Call system call seek with arguments file directory and position of the file
 	syscall_seek(fd, argUS);
 	break;
 	}
   case SYS_TELL:
 	{
+	//Call system call tell with file directory argument
 	*eax = (uint32_t) syscall_tell(fd);
 	break;
 	}
   case SYS_CLOSE:
 	{
+	//Call system call close with file directory argument
 	syscall_close(fd);
 	break;
 	}
@@ -145,6 +161,20 @@ check(const void* addr)
 	}
 	
 	return true;
+}
+static struct currFile *
+findFile(int fd)
+{
+	struct thread *curr = thread_current();
+	struct list_elem *elem;
+	elem = list_begin(&curr->openfiles)
+	while (elem != list_end(&curr->openfiles))
+	{
+		struct currFile *cF = list_entry(elem, struct currFile, elem);
+		if (cF->fd == fd) return cF;
+		elem = list_next(elem);
+	}
+	return NULL;
 }
 void
 syscall_halt(void)
@@ -225,8 +255,7 @@ syscall_open(const char *file)
 	if(check((void *) file))
 	{
 		struct currFile *opened = palloc_get_page (0);
-		opened->fd = thread_current()->next_fd;
-		thread_current()->next_fd++;
+		opened->fd = thread_current()->next_fd++;
 		lock_acquire(&filesys_lock);
 		opened->file = filesys_open(file);
 		lock_release(&filesys_lock);
@@ -244,9 +273,9 @@ int
 syscall_filesize(int fd)
 {
 	int retVal;
-	if(getFile(fd) == NULL) return 0;
+	if(findFile(fd) == NULL) return 0;
 	lock_acquire(&filesys_lock);
-	retVal = file_length(getFile(fd)->file);
+	retVal = file_length(findFile(fd)->file);
 	lock_release(&filesys_lock);
 	return retVal;
 }
@@ -257,7 +286,7 @@ syscall_read(int fd, void *buffer, unsigned size)
 
 	if(!check(buffer)) syscall_exit(-1);
 	
-	if(fd == 0)
+	if(fd == 0)						//If we are in the same directory as the file
 	{
 		while(size > 0)
 		{
@@ -268,11 +297,11 @@ syscall_read(int fd, void *buffer, unsigned size)
 		return readBytes;
 	}
 	else
-	{
-		if(getFile(fd) == NULL) return -1;
+	{								//Otherwise grab the file from the directory and call the supplied file_read function
+		if(findFile(fd) == NULL) return -1;
 		
 		lock_acquire(&filesys_lock);
-		readBytes = file_read(getFile(fd)->file, buffer, size);
+		readBytes = file_read(findFile(fd)->file, buffer, size);
 		lock_release(&filesys_lock);
 
 		return readBytes;
@@ -287,25 +316,25 @@ syscall_write(int fd, const void *buffer, unsigned size)
 	if (!check(buffer)) syscall_exit(-1);
 
 	buffChar = (char *) buffer;
-	if(fd == 1)
+	if(fd == 1)							//If we are in the adjacent file directory as file
 	{
 		while(size > 200)
 		{
-			putbuf(buffChar, 200);
-			buffChar += 200;
-			size -= 200;
-			totalBytes += 200;
+			putbuf(buffChar, 200);	//Places the characters into the buffer argument;
+			buffChar += 200;		//
+			size -= 200;			//
+			totalBytes += 200;		//Write files in increments of 200 bytes so problems don't arise
 		}
-		putbuf(buffChar, size);
+		putbuf(buffChar, size);		//Places remaining characters into buffer
 		totalBytes += size;
 		return totalBytes;
 	}
 	else
-	{
-		if(getFile(fd) == NULL) return 0;
+	{										//Otherwise grab the file from the directory and call the supplied file_write function
+		if(findFile(fd) == NULL) return 0;
 		
 		lock_acquire(&filesys_lock);
-		totalBytes = file_write(getFile(fd)->file, buffer, size);
+		totalBytes = file_write(findFile(fd)->file, buffer, size);
 		lock_release(&filesys_lock);
 		
 		return totalBytes;
@@ -314,42 +343,30 @@ syscall_write(int fd, const void *buffer, unsigned size)
 void
 syscall_seek(int fd, unsigned position)
 {
-	if(getFile(fd) == NULL) return;
+	if(findFile(fd) == NULL) return;
 	
 	lock_acquire(&filesys_lock);
-	file_seek(getFile(fd)->file, position);
+	file_seek(findFile(fd)->file, position);
 	lock_release(&filesys_lock);
 }
 unsigned
 syscall_tell(int fd)
 {
 	unsigned retVal;
-	if(getFile(fd) == NULL) return 0;
+	if(findFile(fd) == NULL) return 0;
 
 	lock_acquire(&filesys_lock);
-	retVal = file_tell(getFile(fd)->file);
+	retVal = file_tell(findFile(fd)->file);
 	lock_release(&filesys_lock);
 	return retVal;
 }
 void
 syscall_close(int fd)
 {
-	if(getFile(fd) == NULL) return;
+	if(findFile(fd) == NULL) return;
 	
 	lock_acquire(&filesys_lock);
-	file_close(getFile(fd)->file);
+	file_close(findFile(fd)->file);
 	lock_release(&filesys_lock);
-	list_remove(&getFile(fd)->elem);
-}
-static struct currFile *
-getFile(int fd)
-{
-	struct thread *curr = thread_current();
-	struct list_elem *elem;
-	for(elem = list_begin(&curr->openfiles); elem != list_end(&curr->openfiles); elem = list_next(elem))
-	{
-		struct currFile *cF = list_entry (elem, struct currFile, elem);
-		if(cF->fd == fd) return cF;
-	}
-	return NULL;
+	list_remove(&findFile(fd)->elem);
 }
